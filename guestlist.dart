@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 class GuestListScreen extends StatefulWidget {
@@ -6,15 +7,15 @@ class GuestListScreen extends StatefulWidget {
 }
 
 class _GuestListScreenState extends State<GuestListScreen> {
-  // List to store guests
-  List<Map<String, dynamic>> guests = [];
+  // Firestore instance
+  final FirebaseFirestore firestore = FirebaseFirestore.instance;
 
   // Search Controller
   TextEditingController searchController = TextEditingController();
   String searchQuery = '';
 
   // Method to filter guests based on search query
-  List<Map<String, dynamic>> get filteredGuests {
+  List<DocumentSnapshot> filterGuests(List<DocumentSnapshot> guests) {
     if (searchQuery.isEmpty) {
       return guests;
     } else {
@@ -42,19 +43,16 @@ class _GuestListScreenState extends State<GuestListScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+              onPressed: () => Navigator.of(context).pop(),
               child: Text('Cancel'),
             ),
             ElevatedButton(
               onPressed: () {
                 if (nameController.text.isNotEmpty) {
-                  setState(() {
-                    guests.add({
-                      'name': nameController.text,
-                      'status': 'pending',
-                    });
+                  // Add guest to Firestore
+                  firestore.collection('guests').add({
+                    'name': nameController.text,
+                    'status': 'pending',
                   });
                   Navigator.of(context).pop();
                 }
@@ -84,11 +82,11 @@ class _GuestListScreenState extends State<GuestListScreen> {
           ),
           title: Text(
             'Event Guest Manager',
-            style: TextStyle(color: Colors.white), // Text color for contrast
+            style: TextStyle(color: Colors.white),
           ),
           centerTitle: true,
-          backgroundColor: Colors.transparent, // Transparent to show gradient
-          elevation: 0, // Remove shadow to keep the gradient clean
+          backgroundColor: Colors.transparent,
+          elevation: 0,
         ),
       ),
       body: Padding(
@@ -112,11 +110,28 @@ class _GuestListScreenState extends State<GuestListScreen> {
             SizedBox(height: 16),
             // Guest List
             Expanded(
-              child: ListView.builder(
-                itemCount: filteredGuests.length,
-                itemBuilder: (context, index) {
-                  final guest = filteredGuests[index];
-                  return _buildGuestTile(guest);
+              child: StreamBuilder<QuerySnapshot>(
+                stream: firestore.collection('guests').snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError) {
+                    return Center(child: Text('Error: ${snapshot.error}'));
+                  }
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    return Center(child: const Text('No guests added yet!'));
+                  }
+
+                  final filteredGuests = filterGuests(snapshot.data!.docs);
+
+                  return ListView.builder(
+                    itemCount: filteredGuests.length,
+                    itemBuilder: (context, index) {
+                      final guest = filteredGuests[index];
+                      return _buildGuestTile(guest);
+                    },
+                  );
                 },
               ),
             ),
@@ -132,39 +147,41 @@ class _GuestListScreenState extends State<GuestListScreen> {
   }
 
   // Method to build each guest tile with color change on confirmed
-  Widget _buildGuestTile(Map<String, dynamic> guest) {
+  Widget _buildGuestTile(DocumentSnapshot guest) {
+    final guestData = guest.data() as Map<String, dynamic>;
+    final guestStatus = guestData['status'];
+    final guestName = guestData['name'];
+
     // Change tile color to pink if confirmed
-    Color tileColor = guest['status'] == 'confirmed'
-        ? Colors.purple // Use pink color for confirmed guests
-        : Colors.grey.shade300; // Use grey for pending guests
+    Color tileColor =
+        guestStatus == 'confirmed' ? Colors.purple : Colors.grey.shade300;
 
     IconData statusIcon =
-        guest['status'] == 'confirmed' ? Icons.check_circle : Icons.access_time;
-    Color iconColor = guest['status'] == 'confirmed'
+        guestStatus == 'confirmed' ? Icons.check_circle : Icons.access_time;
+    Color iconColor = guestStatus == 'confirmed'
         ? Color.fromARGB(255, 197, 45, 172)
         : Colors.grey;
 
     return Container(
       margin: EdgeInsets.symmetric(vertical: 4.0),
       decoration: BoxDecoration(
-        color: tileColor, // Use the updated color
+        color: tileColor,
         borderRadius: BorderRadius.circular(8.0),
       ),
       child: ListTile(
         title: Text(
-          guest['name'],
+          guestName,
           style: TextStyle(
-              color: guest['status'] == 'confirmed'
-                  ? const Color.fromARGB(
-                      255, 235, 233, 235) // Use pink color for confirmed guests
-                  : Color.fromARGB(255, 11, 11, 11)), // Text color for contrast
+              color: guestStatus == 'confirmed'
+                  ? const Color.fromARGB(255, 235, 233, 235)
+                  : Color.fromARGB(255, 11, 11, 11)),
         ),
         trailing: Icon(statusIcon, color: iconColor),
         onTap: () {
-          setState(() {
-            // Toggle the status of the guest when tapped
-            guest['status'] =
-                guest['status'] == 'pending' ? 'confirmed' : 'pending';
+          // Toggle the status of the guest when tapped and update Firestore
+          final newStatus = guestStatus == 'pending' ? 'confirmed' : 'pending';
+          firestore.collection('guests').doc(guest.id).update({
+            'status': newStatus,
           });
         },
       ),
