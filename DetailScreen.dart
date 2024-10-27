@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'dart:typed_data';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:event/Bugdet.dart';
 import 'package:event/Task.dart';
 import 'package:event/guestlist.dart';
@@ -6,12 +7,12 @@ import 'package:flutter/material.dart';
 
 class EventDetailScreen extends StatefulWidget {
   final String eventName;
-  final String imageUrl;
+  final Uint8List imageBytes;
   final String eventDate;
 
   EventDetailScreen({
     required this.eventName,
-    required this.imageUrl,
+    required this.imageBytes,
     required this.eventDate,
   });
 
@@ -21,6 +22,31 @@ class EventDetailScreen extends StatefulWidget {
 
 class _EventDetailScreenState extends State<EventDetailScreen> {
   DateTime selectedDate = DateTime.now();
+  final FirebaseFirestore firestore = FirebaseFirestore.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchEventData(); // Load event data from Firestore when the screen loads
+  }
+
+  // Function to fetch event data from Firestore
+  Future<void> _fetchEventData() async {
+    DocumentSnapshot snapshot =
+        await firestore.collection('events').doc(widget.eventName).get();
+    if (snapshot.exists) {
+      setState(() {
+        selectedDate = (snapshot['selectedDate'] as Timestamp).toDate();
+      });
+    }
+  }
+
+  // Function to update the event date in Firestore
+  Future<void> _updateEventDate() async {
+    await firestore.collection('events').doc(widget.eventName).update({
+      'selectedDate': selectedDate,
+    });
+  }
 
   void _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
@@ -33,6 +59,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
       setState(() {
         selectedDate = picked;
       });
+      _updateEventDate(); // Save the updated date to Firestore
     }
   }
 
@@ -53,11 +80,11 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
           ),
           title: Text(
             widget.eventName,
-            style: TextStyle(color: Colors.white), // Text color for contrast
+            style: TextStyle(color: Colors.white),
           ),
           centerTitle: true,
-          backgroundColor: Colors.transparent, // Transparent to show gradient
-          elevation: 0, // Remove shadow to keep the gradient clean
+          backgroundColor: Colors.transparent,
+          elevation: 0,
           leading: IconButton(
             icon: Icon(Icons.arrow_back, color: Colors.white),
             onPressed: () {
@@ -73,8 +100,8 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
             // Event Image
             ClipRRect(
               borderRadius: BorderRadius.circular(0),
-              child: Image.file(
-                File(widget.imageUrl), // Load local image file
+              child: Image.memory(
+                widget.imageBytes,
                 width: double.infinity,
                 height: 200,
                 fit: BoxFit.cover,
@@ -126,7 +153,8 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                     onPressed: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                            builder: (context) => TaskListScreen()),
+                          builder: (context) => TaskListScreen(),
+                        ),
                       );
                     },
                   ),
