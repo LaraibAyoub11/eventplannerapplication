@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 class TaskListScreen extends StatefulWidget {
@@ -6,15 +7,12 @@ class TaskListScreen extends StatefulWidget {
 }
 
 class _TaskListScreenState extends State<TaskListScreen> {
-  // List to store tasks
-  List<Map<String, dynamic>> tasks = [];
-
-  // Search Controller
+  final FirebaseFirestore firestore = FirebaseFirestore.instance;
   TextEditingController searchController = TextEditingController();
   String searchQuery = '';
 
   // Method to filter tasks based on search query
-  List<Map<String, dynamic>> get filteredTasks {
+  List<DocumentSnapshot> filterTasks(List<DocumentSnapshot> tasks) {
     if (searchQuery.isEmpty) {
       return tasks;
     } else {
@@ -42,20 +40,13 @@ class _TaskListScreenState extends State<TaskListScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+              onPressed: () => Navigator.of(context).pop(),
               child: Text('Cancel'),
             ),
             ElevatedButton(
               onPressed: () {
                 if (titleController.text.isNotEmpty) {
-                  setState(() {
-                    tasks.add({
-                      'title': titleController.text,
-                      'isCompleted': false,
-                    });
-                  });
+                  _addTask(titleController.text);
                   Navigator.of(context).pop();
                 }
               },
@@ -65,6 +56,14 @@ class _TaskListScreenState extends State<TaskListScreen> {
         );
       },
     );
+  }
+
+  Future<void> _addTask(String title) async {
+    await firestore.collection('tasks').add({
+      'title': title,
+      'isCompleted': false,
+      'createdAt': DateTime.now(),
+    });
   }
 
   @override
@@ -112,11 +111,30 @@ class _TaskListScreenState extends State<TaskListScreen> {
             SizedBox(height: 16),
             // Task List
             Expanded(
-              child: ListView.builder(
-                itemCount: filteredTasks.length,
-                itemBuilder: (context, index) {
-                  final task = filteredTasks[index];
-                  return _buildTaskTile(task);
+              child: StreamBuilder<QuerySnapshot>(
+                stream: firestore
+                    .collection('tasks')
+                    .orderBy('createdAt')
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Center(child: CircularProgressIndicator());
+                  }
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    return Center(
+                        child: Text(
+                            'No tasks yet. Add one using the button below.'));
+                  }
+
+                  final filteredTasks = filterTasks(snapshot.data!.docs);
+
+                  return ListView.builder(
+                    itemCount: filteredTasks.length,
+                    itemBuilder: (context, index) {
+                      final task = filteredTasks[index];
+                      return _buildTaskTile(task);
+                    },
+                  );
                 },
               ),
             ),
@@ -132,30 +150,37 @@ class _TaskListScreenState extends State<TaskListScreen> {
   }
 
   // Method to build each task tile
-  Widget _buildTaskTile(Map<String, dynamic> task) {
+  Widget _buildTaskTile(DocumentSnapshot task) {
+    final taskData = task.data() as Map<String, dynamic>;
+
     return Container(
       margin: EdgeInsets.symmetric(vertical: 4.0),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8.0),
-        color:
-            task['isCompleted'] ? Colors.green.shade100 : Colors.grey.shade300,
+        color: taskData['isCompleted']
+            ? Colors.green.shade100
+            : Colors.grey.shade300,
       ),
       child: ListTile(
         title: Text(
-          task['title'],
+          taskData['title'],
           style: TextStyle(
-            color: task['isCompleted'] ? Colors.green : Colors.black,
-            decoration: task['isCompleted'] ? TextDecoration.lineThrough : null,
+            color: taskData['isCompleted'] ? Colors.green : Colors.black,
+            decoration:
+                taskData['isCompleted'] ? TextDecoration.lineThrough : null,
           ),
         ),
         trailing: Icon(
-          task['isCompleted'] ? Icons.check_circle : Icons.check_circle_outline,
-          color: task['isCompleted'] ? Colors.green : Colors.grey,
+          taskData['isCompleted']
+              ? Icons.check_circle
+              : Icons.check_circle_outline,
+          color: taskData['isCompleted'] ? Colors.green : Colors.grey,
         ),
         onTap: () {
-          setState(() {
-            // Toggle the completion status of the task when tapped
-            task['isCompleted'] = !task['isCompleted'];
+          // Toggle task completion status and update Firestore
+          final newStatus = !taskData['isCompleted'];
+          firestore.collection('tasks').doc(task.id).update({
+            'isCompleted': newStatus,
           });
         },
       ),
