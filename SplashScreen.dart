@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:event/Dashboard.dart';
+import 'package:event/login.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 
@@ -15,7 +17,7 @@ class _SplashScreenState extends State<SplashScreen> {
     // Navigate to the next screen after a delay
     Timer(Duration(seconds: 3), () {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => DashboardScreen()),
+        MaterialPageRoute(builder: (context) => LoginScreen()),
       );
     });
   }
