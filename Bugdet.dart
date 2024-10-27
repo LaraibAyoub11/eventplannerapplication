@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 class BudgetScreen extends StatefulWidget {
@@ -11,15 +12,24 @@ class BudgetScreen extends StatefulWidget {
 
 class _BudgetScreenState extends State<BudgetScreen> {
   double totalBudget = 0.0;
-  List<Map<String, dynamic>> transactions = [];
+  final FirebaseFirestore firestore = FirebaseFirestore.instance;
 
   @override
   void initState() {
     super.initState();
-    // Show dialog to ask for the total budget when the screen is first opened
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _askForTotalBudget();
-    });
+    _fetchTotalBudget();
+  }
+
+  Future<void> _fetchTotalBudget() async {
+    final budgetDoc =
+        await firestore.collection('budgets').doc(widget.eventName).get();
+    if (budgetDoc.exists) {
+      setState(() {
+        totalBudget = budgetDoc['totalBudget'];
+      });
+    } else {
+      _askForTotalBudget(); // Prompt for budget if it’s not set yet
+    }
   }
 
   void _askForTotalBudget() {
@@ -42,6 +52,9 @@ class _BudgetScreenState extends State<BudgetScreen> {
               onPressed: () {
                 setState(() {
                   totalBudget = initialBudget;
+                });
+                firestore.collection('budgets').doc(widget.eventName).set({
+                  'totalBudget': initialBudget,
                 });
                 Navigator.of(context).pop();
               },
@@ -106,9 +119,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          _showAddTransactionDialog();
-        },
+        onPressed: _showAddTransactionDialog,
         child: Icon(Icons.add),
         backgroundColor: Colors.purple,
       ),
@@ -116,31 +127,45 @@ class _BudgetScreenState extends State<BudgetScreen> {
   }
 
   Widget _buildTransactionList() {
-    if (transactions.isEmpty) {
-      return Center(
-        child: Text('No transactions yet. Add one using the button below.'),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Transactions',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-        ),
-        // Display the list of transactions
-        ...transactions.map((transaction) {
-          return ListTile(
-            leading: Icon(Icons.monetization_on, color: Colors.purple),
-            title: Text(transaction['category']),
-            trailing: Text(
-              'PKR ${transaction['amount'].toStringAsFixed(2)}',
-              style: TextStyle(color: Colors.red),
-            ),
+    return StreamBuilder<QuerySnapshot>(
+      stream: firestore
+          .collection('budgets')
+          .doc(widget.eventName)
+          .collection('transactions')
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Center(
+            child: Text('No transactions yet. Add one using the button below.'),
           );
-        }).toList(),
-      ],
+        }
+
+        final transactions = snapshot.data!.docs;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Transactions',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            ...transactions.map((transaction) {
+              final data = transaction.data() as Map<String, dynamic>;
+              return ListTile(
+                leading: Icon(Icons.monetization_on, color: Colors.purple),
+                title: Text(data['category']),
+                trailing: Text(
+                  'PKR ${data['amount'].toStringAsFixed(2)}',
+                  style: TextStyle(color: Colors.red),
+                ),
+              );
+            }).toList(),
+          ],
+        );
+      },
     );
   }
 
@@ -173,26 +198,15 @@ class _BudgetScreenState extends State<BudgetScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+              onPressed: () => Navigator.of(context).pop(),
               child: Text('Cancel'),
             ),
             TextButton(
               onPressed: () {
                 if (category.isNotEmpty && amount > 0) {
-                  setState(() {
-                    // Add the transaction to the list
-                    transactions.add({
-                      'category': category,
-                      'amount': amount,
-                    });
-                    totalBudget -=
-                        amount; // Deduct the amount from the total budget
-                  });
+                  _addTransaction(category, amount);
                   Navigator.of(context).pop();
                 } else {
-                  // Show error message if category or amount is invalid
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content:
@@ -207,5 +221,23 @@ class _BudgetScreenState extends State<BudgetScreen> {
         );
       },
     );
+  }
+
+  Future<void> _addTransaction(String category, double amount) async {
+    await firestore
+        .collection('budgets')
+        .doc(widget.eventName)
+        .collection('transactions')
+        .add({
+      'category': category,
+      'amount': amount,
+    });
+    // Update the total budget in Firestore
+    setState(() {
+      totalBudget -= amount;
+    });
+    await firestore.collection('budgets').doc(widget.eventName).update({
+      'totalBudget': totalBudget,
+    });
   }
 }
